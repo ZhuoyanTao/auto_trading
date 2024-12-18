@@ -1,4 +1,4 @@
 stock_data/
 logs/
 *.csv
-
+*.pem
