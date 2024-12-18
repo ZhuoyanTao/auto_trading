@@ -19,7 +19,7 @@ def fetch_or_load_data(ticker, interval, data_dir):
     file_path = os.path.join(data_dir, f"{ticker}_{interval}.csv")
     if os.path.exists(file_path):
         print(f"Loading data for {ticker} from local file...")
-        # Skip first 2 rows to handle Ticker and empty rows
+        # Skip extra rows to handle headers correctly
         df = pd.read_csv(file_path, skiprows=2, index_col=0)
         df.index = pd.to_datetime(df.index, errors='coerce')  # Parse timestamps
         df = df.dropna()  # Drop invalid rows with NaT index or NaN values
@@ -32,8 +32,6 @@ def fetch_or_load_data(ticker, interval, data_dir):
             df.to_csv(file_path)
             print(f"Data for {ticker} saved to {file_path}.")
         return df if not df.empty else None
-
-
 
 
 def backtest_single_combination(args):
@@ -49,7 +47,6 @@ def backtest_single_combination(args):
         entry_price = 0
         peak_price = 0
 
-        # Debugging: Print for clarity
         print(f"Testing: {ticker}, Neighborhood={neighborhood_size}, Threshold={threshold}, Stop-Loss={stop_loss_percent}")
 
         for i in range(neighborhood_size, len(prices)):
@@ -57,8 +54,8 @@ def backtest_single_combination(args):
             local_min = neighborhood.min()
             local_max = neighborhood.max()
 
-            rise_from_min = (prices.iloc[i] - local_min) / local_min
-            drop_from_max = (local_max - prices.iloc[i]) / local_max
+            rise_from_min = (prices.iloc[i] - local_min) / local_min if local_min > 0 else 0
+            drop_from_max = (local_max - prices.iloc[i]) / local_max if local_max > 0 else 0
 
             # Check for entry points
             if position is None:
@@ -79,7 +76,7 @@ def backtest_single_combination(args):
             elif position == 'long':
                 peak_price = max(peak_price, prices.iloc[i])
                 if prices.iloc[i] <= peak_price * (1 - stop_loss_percent):
-                    profit = (prices.iloc[i] - entry_price) / entry_price
+                    profit = (prices.iloc[i] - entry_price) / entry_price - transaction_cost
                     total_profit += profit
                     print(f"LONG EXIT: {ticker} at {prices.index[i]}, Exit Price={prices.iloc[i]:.2f}, Profit={profit:.4f}")
                     position = None
@@ -87,7 +84,7 @@ def backtest_single_combination(args):
             elif position == 'short':
                 peak_price = min(peak_price, prices.iloc[i])
                 if prices.iloc[i] >= peak_price * (1 + stop_loss_percent):
-                    profit = (entry_price - prices.iloc[i]) / entry_price
+                    profit = (entry_price - prices.iloc[i]) / entry_price - transaction_cost
                     total_profit += profit
                     print(f"SHORT EXIT: {ticker} at {prices.index[i]}, Exit Price={prices.iloc[i]:.2f}, Profit={profit:.4f}")
                     position = None
@@ -108,9 +105,10 @@ if __name__ == '__main__':
     print("Sample Adj Close Data:")
     print(adj_close.head())
 
-    thresholds = np.arange(0.005, 0.015, 0.001)
-    stop_loss_range = np.arange(0.05, 0.07, 0.005)
-    neighborhood_sizes = np.arange(10, 20, 1)
+    # Define parameter ranges
+    thresholds = np.arange(0.006, 0.011, 0.001)  # Narrow range for thresholds
+    stop_loss_range = np.arange(0.05, 0.07, 0.005)  # Fine-tuned stop-loss
+    neighborhood_sizes = np.arange(10, 15, 1)  # Focused neighborhood sizes
 
 
     # Prepare arguments for multiprocessing
