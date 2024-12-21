@@ -9,7 +9,8 @@ data_dir = "stock_data"
 os.makedirs(data_dir, exist_ok=True)
 
 # List of tickers and interval
-tickers = ['RGTI', 'QUBT', 'QBTS', 'IONQ']
+# tickers = ['RGTI', 'QUBT', 'QBTS', 'IONQ']
+tickers = ['RGTI', 'QUBT', 'QBTS']
 interval = "5m"  # '5m' for 5-minute data
 adj_close = pd.DataFrame()
 

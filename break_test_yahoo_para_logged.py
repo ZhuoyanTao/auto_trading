@@ -9,7 +9,7 @@ data_dir = "stock_data"
 os.makedirs(data_dir, exist_ok=True)
 
 # List of tickers and interval
-tickers = ['RGTI', 'QUBT', 'QBTS', 'IONQ']
+tickers = ['RGTI', 'QUBT', 'QBTS']
 interval = "5m"  # '5m' for 5-minute data
 adj_close = pd.DataFrame()
 
@@ -17,21 +17,21 @@ adj_close = pd.DataFrame()
 def fetch_or_load_data(ticker, interval, data_dir):
     """Fetch data from Yahoo Finance or load from local file."""
     file_path = os.path.join(data_dir, f"{ticker}_{interval}.csv")
-    if os.path.exists(file_path):
-        print(f"Loading data for {ticker} from local file...")
-        # Skip extra rows to handle headers correctly
-        df = pd.read_csv(file_path, skiprows=2, index_col=0)
-        df.index = pd.to_datetime(df.index, errors='coerce')  # Parse timestamps
-        df = df.dropna()  # Drop invalid rows with NaT index or NaN values
-        print(f"Loaded data for {ticker}:\n{df.head()}")
-        return df
-    else:
-        print(f"Fetching data for {ticker} from Yahoo Finance...")
-        df = yf.download(ticker, interval=interval, period="5d")
-        if not df.empty:
-            df.to_csv(file_path)
-            print(f"Data for {ticker} saved to {file_path}.")
-        return df if not df.empty else None
+    # if os.path.exists(file_path):
+    #     print(f"Loading data for {ticker} from local file...")
+    #     # Skip extra rows to handle headers correctly
+    #     df = pd.read_csv(file_path, skiprows=2, index_col=0)
+    #     df.index = pd.to_datetime(df.index, errors='coerce')  # Parse timestamps
+    #     df = df.dropna()  # Drop invalid rows with NaT index or NaN values
+    #     print(f"Loaded data for {ticker}:\n{df.head()}")
+    #     return df
+    
+    print(f"Fetching data for {ticker} from Yahoo Finance...")
+    df = yf.download(ticker, interval=interval, period="5d")
+    if not df.empty:
+        df.to_csv(file_path)
+        print(f"Data for {ticker} saved to {file_path}.")
+    return df if not df.empty else None
 
 
 def backtest_single_combination(args):
@@ -105,10 +105,10 @@ if __name__ == '__main__':
     print("Sample Adj Close Data:")
     print(adj_close.head())
 
-    # Define parameter ranges
-    thresholds = np.arange(0.006, 0.011, 0.001)  # Narrow range for thresholds
-    stop_loss_range = np.arange(0.05, 0.07, 0.005)  # Fine-tuned stop-loss
-    neighborhood_sizes = np.arange(10, 15, 1)  # Focused neighborhood sizes
+    thresholds = np.arange(0.001, 0.201, 0.001)  # Thresholds: 0.1% to 5%
+    stop_loss_range = np.arange(0.01, 0.21, 0.005)  # Stop-loss: 1% to 10%
+    neighborhood_sizes = np.arange(10, 15, 1)  # Neighborhood sizes: 10 to 30 intervals
+
 
 
     # Prepare arguments for multiprocessing
