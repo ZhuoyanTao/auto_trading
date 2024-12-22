@@ -16,19 +16,23 @@ BALANCE_FILE = "balance.json"  # File to track balance and trades
 # Schwab OAuth Endpoint
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 
+
 # Initialize balance tracking
 def initialize_balance():
     if not os.path.exists(BALANCE_FILE):
         with open(BALANCE_FILE, "w") as f:
             json.dump({"balance": TRADE_AMOUNT, "trades": []}, f)
 
+
 def load_balance():
     with open(BALANCE_FILE, "r") as f:
         return json.load(f)
 
+
 def save_balance(data):
     with open(BALANCE_FILE, "w") as f:
         json.dump(data, f, indent=4)
+
 
 # Get access token
 def get_access_token():
@@ -46,6 +50,7 @@ def get_access_token():
     else:
         raise Exception(f"Error obtaining access token: {response.text}")
 
+
 # Fetch the current price of QBTS
 def fetch_stock_price(access_token):
     url = f"https://api.schwabapi.com/v1/quotes/{TRADE_SYMBOL}"
@@ -56,6 +61,7 @@ def fetch_stock_price(access_token):
         return float(price)
     else:
         raise Exception(f"Error fetching stock price: {response.text}")
+
 
 # Place trade (BUY or SHORT)
 def place_trade(access_token, action, quantity):
@@ -78,6 +84,7 @@ def place_trade(access_token, action, quantity):
     else:
         print(f"Trade failed: {response.text}")
         return False
+
 
 # Main logic
 def trading_bot():
@@ -103,18 +110,30 @@ def trading_bot():
                     if place_trade(access_token, "BUY", shares_to_buy):
                         balance -= shares_to_buy * current_price
                         data["trades"].append(
-                            {"action": "BUY", "price": current_price, "shares": shares_to_buy, "timestamp": str(datetime.now())}
+                            {
+                                "action": "BUY",
+                                "price": current_price,
+                                "shares": shares_to_buy,
+                                "timestamp": str(datetime.now()),
+                            }
                         )
                         print(f"Bought {shares_to_buy} shares at ${current_price:.2f}")
-                
+
                 elif price_change < -3:  # Short condition
                     shares_to_short = round(balance / current_price, 2)
                     if place_trade(access_token, "SHORT", shares_to_short):
                         balance += shares_to_short * current_price
                         data["trades"].append(
-                            {"action": "SHORT", "price": current_price, "shares": shares_to_short, "timestamp": str(datetime.now())}
+                            {
+                                "action": "SHORT",
+                                "price": current_price,
+                                "shares": shares_to_short,
+                                "timestamp": str(datetime.now()),
+                            }
                         )
-                        print(f"Shorted {shares_to_short} shares at ${current_price:.2f}")
+                        print(
+                            f"Shorted {shares_to_short} shares at ${current_price:.2f}"
+                        )
 
                 # Update balance file
                 data["balance"] = round(balance, 2)
@@ -127,6 +146,7 @@ def trading_bot():
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(60)  # Wait 1 minute on error and retry
+
 
 # Run the bot
 if __name__ == "__main__":
