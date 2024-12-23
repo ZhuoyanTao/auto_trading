@@ -9,6 +9,51 @@ logging.basicConfig(level=logging.INFO)
 import requests
 import logging
 
+import logging
+from datetime import datetime
+import pytz
+
+def check_market_hours():
+    """Check current market session and return its type."""
+    logging.debug("Checking market hours...")
+    endpoint = "marketdata/v1/markets?markets=equity"
+    date_today = datetime.now().strftime("%Y-%m-%d")
+    data = make_api_request("GET", f"{endpoint}&date={date_today}")
+
+    if not data:
+        logging.error("Failed to fetch market hours data.")
+        return None
+
+    try:
+        equity_data = data.get("equity", {}).get("EQ", {})
+        sessions = equity_data.get("sessionHours", {})
+        now = datetime.now(pytz.utc)  # Ensure UTC for accurate comparisons
+
+        logging.info(f"Current UTC time: {now}")
+        logging.info("Market session details fetched:")
+        logging.info(equity_data)
+
+        for session_type, periods in sessions.items():
+            for session in periods:
+                start = datetime.fromisoformat(session["start"]).astimezone(pytz.utc)
+                end = datetime.fromisoformat(session["end"]).astimezone(pytz.utc)
+
+                logging.info(
+                    f"Session type: {session_type}, Start: {start}, End: {end}"
+                )
+
+                if start <= now <= end:
+                    logging.info(f"Current session: {session_type}")
+                    return session_type
+
+        logging.info("Market is currently closed.")
+        return None  # Market is closed
+    except Exception as e:
+        logging.error(f"Error parsing market hours: {e}")
+        return None
+
+
+
 def fetch_quotes(access_token, symbols):
     """
     Fetch quotes for a list of symbols using Schwab's API.

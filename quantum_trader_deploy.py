@@ -6,15 +6,39 @@ from mock_trader import (
     get_latest_token_and_account,
     fetch_market_price,
     place_order_with_validation,
+    check_market_hours
 )
-from quantum_trader3 import check_market_hours
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+import logging
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+
+# Configure RotatingFileHandler
+file_size_handler = RotatingFileHandler(
+    "trader_log.log", maxBytes=5 * 1024 * 1024, backupCount=3
+)  # 5MB per file, keep 3 backups
+file_size_formatter = logging.Formatter(
+    "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
 )
+file_size_handler.setFormatter(file_size_formatter)
+
+# Configure TimedRotatingFileHandler
+daily_rotation_handler = TimedRotatingFileHandler(
+    "trader_log_daily.log", when="midnight", interval=1, backupCount=7
+)  # Rotate daily, keep logs for 7 days
+daily_rotation_formatter = logging.Formatter(
+    "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+)
+daily_rotation_handler.setFormatter(daily_rotation_formatter)
+
+# Set up the logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(file_size_handler)
+logger.addHandler(daily_rotation_handler)
+
+# Example usage
+logger.info("Logger initialized with both file size and daily rotation handlers.")
+
 
 # Trading parameters
 tickers = ["RGTI", "QUBT", "QBTS", "IONQ"]
@@ -91,8 +115,9 @@ def trade_logic():
         entry_price = 0
 
         while True:
-            if not check_market_hours():
-                logging.info("Market closed. Waiting 60s...")
+            session_type = check_market_hours()
+            if not session_type:
+                logging.info("Market is closed. Waiting 60s...")
                 time.sleep(60)
                 continue
 
@@ -102,12 +127,16 @@ def trade_logic():
                 time.sleep(60)
                 continue
 
+            # Collect prices during all sessions
             prices.append(price)
             if len(prices) > neighborhood_size:
                 prices.pop(0)  # Keep buffer size fixed
 
-            logging.info(f"{datetime.now()} | {ticker} | Current Price: {price:.2f}")
+            logging.info(
+                f"{datetime.now()} | {ticker} | Current Price: {price:.2f} | Session: {session_type}"
+            )
 
+            # Skip trading logic if not enough data
             if len(prices) < neighborhood_size:
                 logging.info(
                     f"Not enough price data for {ticker} yet. Need {neighborhood_size}, have {len(prices)}."
@@ -115,95 +144,98 @@ def trade_logic():
                 time.sleep(60)
                 continue
 
-            # Enter trade logic
-            if position is None:
-                decision = should_enter_trade(prices, threshold)
-                quantity = int(capital // price)
+            # Only place orders during regular market hours
+            if session_type == "regularMarket":
+                # Enter trade logic
+                if position is None:
+                    decision = should_enter_trade(prices, threshold)
+                    quantity = int(capital // price)
 
-                if decision == "long" and quantity > 0:
-                    logging.info(
-                        f"Attempting a LONG position for {ticker} with quantity={quantity}..."
-                    )
-                    trade = {"order_type": "BUY", "symbol": ticker, "quantity": quantity}
-                    if place_order_with_validation(
-                        access_token, encrypted_account_number, trade
-                    ):
-                        position = "long"
-                        entry_price = price
-                        positions[ticker]["shares"] += quantity
-                        positions[ticker]["entry_price"] = price
-                        capital_cost = quantity * price * (1 + transaction_cost)
-                        capital -= capital_cost
+                    if decision == "long" and quantity > 0:
                         logging.info(
-                            f"LONG entered: cost={capital_cost:.2f}, new capital={capital:.2f}"
+                            f"Attempting a LONG position for {ticker} with quantity={quantity}..."
                         )
+                        trade = {"order_type": "BUY", "symbol": ticker, "quantity": quantity}
+                        if place_order_with_validation(
+                            access_token, encrypted_account_number, trade
+                        ):
+                            position = "long"
+                            entry_price = price
+                            positions[ticker]["shares"] += quantity
+                            positions[ticker]["entry_price"] = price
+                            capital_cost = quantity * price * (1 + transaction_cost)
+                            capital -= capital_cost
+                            logging.info(
+                                f"LONG entered: cost={capital_cost:.2f}, new capital={capital:.2f}"
+                            )
 
-                elif decision == "short" and quantity > 0:
-                    logging.info(
-                        f"Attempting a SHORT position for {ticker} with quantity={quantity}..."
-                    )
-                    trade = {
-                        "order_type": "SELL_SHORT",
-                        "symbol": ticker,
-                        "quantity": quantity,
-                    }
-                    if place_order_with_validation(
-                        access_token, encrypted_account_number, trade
-                    ):
-                        position = "short"
-                        entry_price = price
-                        positions[ticker]["borrowed_shares"] += quantity
-                        positions[ticker]["entry_price"] = price
-                        proceeds = quantity * price * (1 - transaction_cost)
-                        capital += proceeds
+                    elif decision == "short" and quantity > 0:
                         logging.info(
-                            f"SHORT entered: proceeds={proceeds:.2f}, new capital={capital:.2f}"
+                            f"Attempting a SHORT position for {ticker} with quantity={quantity}..."
                         )
+                        trade = {
+                            "order_type": "SELL_SHORT",
+                            "symbol": ticker,
+                            "quantity": quantity,
+                        }
+                        if place_order_with_validation(
+                            access_token, encrypted_account_number, trade
+                        ):
+                            position = "short"
+                            entry_price = price
+                            positions[ticker]["borrowed_shares"] += quantity
+                            positions[ticker]["entry_price"] = price
+                            proceeds = quantity * price * (1 - transaction_cost)
+                            capital += proceeds
+                            logging.info(
+                                f"SHORT entered: proceeds={proceeds:.2f}, new capital={capital:.2f}"
+                            )
 
-            # Exit trade logic
-            elif position == "long":
-                if should_exit_trade(position, prices, entry_price, stop_loss_percent):
-                    quantity = positions[ticker]["shares"]
-                    logging.info(
-                        f"Exiting LONG position for {ticker} with quantity={quantity}..."
-                    )
-                    trade = {"order_type": "SELL", "symbol": ticker, "quantity": quantity}
-                    if place_order_with_validation(
-                        access_token, encrypted_account_number, trade
-                    ):
-                        proceeds = quantity * price * (1 - transaction_cost)
-                        capital += proceeds
-                        positions[ticker]["shares"] = 0
-                        positions[ticker]["entry_price"] = 0
-                        position = None
+                # Exit trade logic
+                elif position == "long":
+                    if should_exit_trade(position, prices, entry_price, stop_loss_percent):
+                        quantity = positions[ticker]["shares"]
                         logging.info(
-                            f"LONG exit: proceeds={proceeds:.2f}, new capital={capital:.2f}"
+                            f"Exiting LONG position for {ticker} with quantity={quantity}..."
                         )
+                        trade = {"order_type": "SELL", "symbol": ticker, "quantity": quantity}
+                        if place_order_with_validation(
+                            access_token, encrypted_account_number, trade
+                        ):
+                            proceeds = quantity * price * (1 - transaction_cost)
+                            capital += proceeds
+                            positions[ticker]["shares"] = 0
+                            positions[ticker]["entry_price"] = 0
+                            position = None
+                            logging.info(
+                                f"LONG exit: proceeds={proceeds:.2f}, new capital={capital:.2f}"
+                            )
 
-            elif position == "short":
-                if should_exit_trade(position, prices, entry_price, stop_loss_percent):
-                    quantity = abs(positions[ticker]["borrowed_shares"])
-                    logging.info(
-                        f"Exiting SHORT position for {ticker} with quantity={quantity}..."
-                    )
-                    trade = {
-                        "order_type": "BUY_TO_COVER",
-                        "symbol": ticker,
-                        "quantity": quantity,
-                    }
-                    if place_order_with_validation(
-                        access_token, encrypted_account_number, trade
-                    ):
-                        cost = quantity * price * (1 + transaction_cost)
-                        capital -= cost
-                        positions[ticker]["borrowed_shares"] = 0
-                        positions[ticker]["entry_price"] = 0
-                        position = None
+                elif position == "short":
+                    if should_exit_trade(position, prices, entry_price, stop_loss_percent):
+                        quantity = abs(positions[ticker]["borrowed_shares"])
                         logging.info(
-                            f"SHORT exit: cost={cost:.2f}, new capital={capital:.2f}"
+                            f"Exiting SHORT position for {ticker} with quantity={quantity}..."
                         )
+                        trade = {
+                            "order_type": "BUY_TO_COVER",
+                            "symbol": ticker,
+                            "quantity": quantity,
+                        }
+                        if place_order_with_validation(
+                            access_token, encrypted_account_number, trade
+                        ):
+                            cost = quantity * price * (1 + transaction_cost)
+                            capital -= cost
+                            positions[ticker]["borrowed_shares"] = 0
+                            positions[ticker]["entry_price"] = 0
+                            position = None
+                            logging.info(
+                                f"SHORT exit: cost={cost:.2f}, new capital={capital:.2f}"
+                            )
 
             time.sleep(60)
+
 
 
 if __name__ == "__main__":
