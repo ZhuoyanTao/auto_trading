@@ -6,7 +6,8 @@ from mock_trader import (
     get_latest_token_and_account,
     fetch_market_price,
     place_order_with_validation,
-    check_market_hours
+    check_market_hours,
+    make_api_request
 )
 
 import logging
@@ -109,45 +110,53 @@ def trade_logic():
     access_token, account_number = get_latest_token_and_account()
     encrypted_account_number = get_encrypted_account_number(access_token)
 
-    for ticker in tickers:
-        prices = []  # Price buffer for each ticker
-        position = None
-        entry_price = 0
+    # Initialize price buffers and positions for each ticker
+    prices_buffers = {ticker: [] for ticker in tickers}
+    positions = {
+        ticker: {
+            "shares": 0,
+            "borrowed_shares": 0,
+            "entry_price": 0,
+            "position": None  # Tracks "long", "short", or None
+        }
+        for ticker in tickers
+    }
 
-        while True:
-            session_type = check_market_hours()
+    while True:  # Continuous trading loop
+        for ticker in tickers:  # Iterate through tickers
+            session_type = check_market_hours(access_token)
             if not session_type:
                 logging.info("Market is closed. Waiting 60s...")
-                time.sleep(60)
                 continue
 
             price = fetch_market_price(ticker, access_token)
             if price is None:
                 logging.warning(f"Price unavailable for {ticker}, skipping for 60s.")
-                time.sleep(60)
                 continue
 
-            # Collect prices during all sessions
-            prices.append(price)
-            if len(prices) > neighborhood_size:
-                prices.pop(0)  # Keep buffer size fixed
+            # Update the price buffer for the current ticker
+            prices_buffers[ticker].append(price)
+            if len(prices_buffers[ticker]) > neighborhood_size:
+                prices_buffers[ticker].pop(0)  # Keep buffer size fixed
 
             logging.info(
                 f"{datetime.now()} | {ticker} | Current Price: {price:.2f} | Session: {session_type}"
             )
 
             # Skip trading logic if not enough data
-            if len(prices) < neighborhood_size:
+            if len(prices_buffers[ticker]) < neighborhood_size:
                 logging.info(
-                    f"Not enough price data for {ticker} yet. Need {neighborhood_size}, have {len(prices)}."
+                    f"Not enough price data for {ticker} yet. Need {neighborhood_size}, have {len(prices_buffers[ticker])}."
                 )
-                time.sleep(60)
                 continue
 
             # Only place orders during regular market hours
             if session_type == "regularMarket":
+                # Use ticker-specific buffer and positions
+                prices = prices_buffers[ticker]
+
                 # Enter trade logic
-                if position is None:
+                if positions[ticker]["position"] is None:
                     decision = should_enter_trade(prices, threshold)
                     quantity = int(capital // price)
 
@@ -159,10 +168,9 @@ def trade_logic():
                         if place_order_with_validation(
                             access_token, encrypted_account_number, trade
                         ):
-                            position = "long"
-                            entry_price = price
                             positions[ticker]["shares"] += quantity
                             positions[ticker]["entry_price"] = price
+                            positions[ticker]["position"] = "long"
                             capital_cost = quantity * price * (1 + transaction_cost)
                             capital -= capital_cost
                             logging.info(
@@ -181,10 +189,9 @@ def trade_logic():
                         if place_order_with_validation(
                             access_token, encrypted_account_number, trade
                         ):
-                            position = "short"
-                            entry_price = price
                             positions[ticker]["borrowed_shares"] += quantity
                             positions[ticker]["entry_price"] = price
+                            positions[ticker]["position"] = "short"
                             proceeds = quantity * price * (1 - transaction_cost)
                             capital += proceeds
                             logging.info(
@@ -192,8 +199,8 @@ def trade_logic():
                             )
 
                 # Exit trade logic
-                elif position == "long":
-                    if should_exit_trade(position, prices, entry_price, stop_loss_percent):
+                elif positions[ticker]["position"] == "long":
+                    if should_exit_trade("long", prices, positions[ticker]["entry_price"], stop_loss_percent):
                         quantity = positions[ticker]["shares"]
                         logging.info(
                             f"Exiting LONG position for {ticker} with quantity={quantity}..."
@@ -206,13 +213,13 @@ def trade_logic():
                             capital += proceeds
                             positions[ticker]["shares"] = 0
                             positions[ticker]["entry_price"] = 0
-                            position = None
+                            positions[ticker]["position"] = None
                             logging.info(
                                 f"LONG exit: proceeds={proceeds:.2f}, new capital={capital:.2f}"
                             )
 
-                elif position == "short":
-                    if should_exit_trade(position, prices, entry_price, stop_loss_percent):
+                elif positions[ticker]["position"] == "short":
+                    if should_exit_trade("short", prices, positions[ticker]["entry_price"], stop_loss_percent):
                         quantity = abs(positions[ticker]["borrowed_shares"])
                         logging.info(
                             f"Exiting SHORT position for {ticker} with quantity={quantity}..."
@@ -229,12 +236,12 @@ def trade_logic():
                             capital -= cost
                             positions[ticker]["borrowed_shares"] = 0
                             positions[ticker]["entry_price"] = 0
-                            position = None
+                            positions[ticker]["position"] = None
                             logging.info(
                                 f"SHORT exit: cost={cost:.2f}, new capital={capital:.2f}"
                             )
-
-            time.sleep(60)
+        print('End of True iteration, waiting 60s.')
+        time.sleep(60)  # Wait before processing the next ticker
 
 
 

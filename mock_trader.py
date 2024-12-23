@@ -12,13 +12,42 @@ import logging
 import logging
 from datetime import datetime
 import pytz
+from typing import Optional
 
-def check_market_hours():
-    """Check current market session and return its type."""
+def make_api_request(method, endpoint, access_token):
+    """
+    Make an API request to the Schwab API.
+    :param method: HTTP method (e.g., 'GET').
+    :param endpoint: The API endpoint to request.
+    :return: Parsed JSON response or None in case of errors.
+    """
+    base_url = "https://api.schwabapi.com/"
+    url = f"{base_url}{endpoint}"
+    
+    headers = {
+        "accept": "application/json",
+        "Authorization": f"Bearer {access_token}",  # Replace with your actual token
+    }
+
+    try:
+        response = requests.request(method, url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logging.error(f"Error: {response.status_code} - {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"API request failed: {e}")
+        return None
+
+def check_market_hours(access_token):
+    """
+    Check the current market session and return its type.
+    """
     logging.debug("Checking market hours...")
-    endpoint = "marketdata/v1/markets?markets=equity"
+    endpoint = "marketdata/v1/markets/equity"
     date_today = datetime.now().strftime("%Y-%m-%d")
-    data = make_api_request("GET", f"{endpoint}&date={date_today}")
+    data = make_api_request("GET", f"{endpoint}?date={date_today}", access_token)
 
     if not data:
         logging.error("Failed to fetch market hours data.")
@@ -110,7 +139,7 @@ def fetch_single_quote(access_token, symbol):
         return None
 
 
-def fetch_market_price(symbol, access_token):
+def fetch_market_price(symbol: str, access_token: str) -> Optional[float]:
     """
     Fetch the market price for a given stock symbol using the Schwab API.
 
@@ -119,15 +148,16 @@ def fetch_market_price(symbol, access_token):
         access_token (str): The API access token for authorization.
 
     Returns:
-        float: The market price if successful, None otherwise.
+        Optional[float]: The market price if successful, None otherwise.
     """
+    # Construct the API URL
     url = f"https://api.schwabapi.com/marketdata/v1/{symbol}/quotes"
     headers = {
         "Authorization": f"Bearer {access_token}",
         "accept": "application/json"
     }
     params = {
-        "fields": "quote,reference"
+        "fields": "quote,reference"  # Request quote and reference data
     }
 
     logging.info(f"Fetching market price for symbol: {symbol}")
@@ -138,31 +168,39 @@ def fetch_market_price(symbol, access_token):
     try:
         # Send the GET request to the API
         response = requests.get(url, headers=headers, params=params)
-
-        # Log the status code and response for debugging
         logging.info(f"API Response Status Code: {response.status_code}")
+
+        # Log the full response if needed for debugging
         logging.debug(f"API Response Body: {response.text}")
 
         if response.status_code == 200:
-            # Parse and log the response
+            # Parse the JSON response
             data = response.json()
             logging.info(f"Successfully fetched data for {symbol}: {data}")
-
-            # Extract and return the market price
-            price = data.get("quote", {}).get("lastPrice", None)
+            symbol_data = data.get(symbol, {})
+            quote_data = symbol_data.get("quote", {})
+            price = quote_data.get("lastPrice")
             if price is not None:
                 logging.info(f"Market price for {symbol}: {price}")
+                return price
             else:
                 logging.warning(f"Market price not found in response for {symbol}")
-
-            return price
+                return None
         else:
-            # Log the error details for troubleshooting
+            # Log errors if the response is not successful
             logging.error(f"Failed to fetch price for {symbol}: {response.status_code} - {response.text}")
             return None
+    except requests.exceptions.RequestException as req_err:
+        # Handle request-related errors
+        logging.error(f"Request error while fetching price for {symbol}: {req_err}")
+        return None
+    except ValueError as json_err:
+        # Handle JSON decoding errors
+        logging.error(f"Error decoding JSON response for {symbol}: {json_err}")
+        return None
     except Exception as e:
-        # Log unexpected exceptions
-        logging.error(f"Unexpected error fetching price for {symbol}: {e}")
+        # Handle other unexpected errors
+        logging.error(f"Unexpected error while fetching price for {symbol}: {e}")
         return None
 
 
