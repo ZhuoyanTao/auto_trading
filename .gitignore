@@ -3,3 +3,4 @@ logs/
 *.csv
 *.pem
 *.log
+venv/

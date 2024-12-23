@@ -5,9 +5,9 @@ from mock_trader import (
     get_encrypted_account_number,
     get_latest_token_and_account,
     fetch_market_price,
-    check_market_hours,
     place_order_with_validation,
 )
+from quantum_trader3 import check_market_hours
 
 # Set up logging
 logging.basicConfig(
@@ -20,7 +20,7 @@ logging.basicConfig(
 tickers = ["RGTI", "QUBT", "QBTS", "IONQ"]
 transaction_cost = 0.0005  # 0.05%
 capital = 2000  # Starting capital
-neighborhood_size = 12
+neighborhood_size = 60
 threshold = 0.01
 stop_loss_percent = 0.06
 
