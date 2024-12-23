@@ -240,7 +240,7 @@ def trade_logic():
                             logging.info(
                                 f"SHORT exit: cost={cost:.2f}, new capital={capital:.2f}"
                             )
-        print('End of True iteration, waiting 60s.')
+        logger.info('End of True iteration, waiting 60s.')
         time.sleep(60)  # Wait before processing the next ticker
 
 
