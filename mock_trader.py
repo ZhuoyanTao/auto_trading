@@ -259,7 +259,17 @@ def get_latest_token_and_account():
     logging.info(f"Retrieved account_number: {account_number[:4]}***")
     return access_token, account_number
 
-def get_encrypted_account_number(access_token):
+def get_encrypted_account_number(access_token, previous_account_number):
+    """
+    Fetches the encrypted account number using the Schwab API.
+    If the fetch fails, it falls back to the previously cached account number.
+
+    Args:
+        access_token (str): The API access token for authorization.
+
+    Returns:
+        str: The encrypted account number.
+    """
     api_url = "https://api.schwabapi.com/trader/v1/accounts/accountNumbers"
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -267,21 +277,41 @@ def get_encrypted_account_number(access_token):
     }
 
     logging.info("Fetching encrypted account number...")
-    response = requests.get(api_url, headers=headers)
 
-    if response.status_code == 200:
-        accounts = response.json()
-        if accounts:
-            logging.info("Encrypted account number retrieved successfully.")
-            return accounts[0]["hashValue"]  # Assuming the first account
+    try:
+        # Attempt to fetch the encrypted account number
+        response = requests.get(api_url, headers=headers)
+
+        if response.status_code == 200:
+            accounts = response.json()
+            if accounts:
+                logging.info("Encrypted account number retrieved successfully.")
+                # Cache the fetched account number for future use
+                previous_account_number = accounts[0]["hashValue"]  # Assuming the first account
+                return previous_account_number
+            else:
+                logging.error("No accounts found. Using the previous account number.")
+                if previous_account_number:
+                    return previous_account_number
+                else:
+                    raise ValueError("No accounts available and no previous account number to fall back on.")
         else:
-            logging.error("No accounts found.")
-            raise ValueError("No accounts available.")
-    else:
-        logging.error(
-            f"Failed to fetch encrypted account number: {response.status_code}, {response.text}"
-        )
-        raise ValueError("Failed to fetch encrypted account number.")
+            logging.error(
+                f"Failed to fetch encrypted account number: {response.status_code}, {response.text}"
+            )
+            if previous_account_number:
+                logging.warning("Using the previous account number due to API failure.")
+                return previous_account_number
+            else:
+                raise ValueError("Failed to fetch encrypted account number and no fallback available.")
+
+    except Exception as e:
+        logging.error(f"Unexpected error fetching account number: {e}")
+        if previous_account_number:
+            logging.warning("Using the previous account number due to unexpected error.")
+            return previous_account_number
+        else:
+            raise ValueError("Unexpected error and no fallback account number available.")
 
 def place_order_with_validation(access_token, encrypted_account_number, trade):
     # Fetch market price if necessary
@@ -293,7 +323,7 @@ def place_order_with_validation(access_token, encrypted_account_number, trade):
     payload = get_order_payload(
         trade["order_type"], trade["symbol"], trade["quantity"], trade.get("price")
     )
-    place_order(access_token, encrypted_account_number, payload)
+    return place_order(access_token, encrypted_account_number, payload)
 
 # Function to place an order
 def place_order(access_token, encrypted_account_number, payload):
@@ -309,10 +339,12 @@ def place_order(access_token, encrypted_account_number, payload):
 
     if response.status_code == 201:
         logging.info("Order placed successfully!")
+        return True
     else:
         logging.error(
             f"Failed to place order: {response.status_code}, {response.text}"
         )
+        return False
 
 # Prepare the JSON payload for each type of trade
 def get_order_payload(order_type, symbol, quantity, price=None):
