@@ -8,7 +8,7 @@ from mock_trader import (
     check_market_hours,
     make_api_request
 )
-
+import pandas_market_calendars as mcal
 import logging
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from datetime import datetime, timezone, timedelta
@@ -102,25 +102,39 @@ def should_exit_trade(position, prices, entry_price, stop_loss_percent):
             return True
     return False
 
+from datetime import datetime, timedelta
+import pytz  # For timezone handling
+
 def get_clear_time(market_hours):
     """
-    Calculate the time to clear all positions (5 minutes before market close).
+    Calculate the time to clear all positions (5 minutes before regular market close).
 
     Args:
         market_hours (dict): Market hours data from the API.
 
     Returns:
-        datetime: The clear time, or None if market close time is unavailable.
+        datetime: The clear time in the local timezone, or None if market close time is unavailable.
     """
     try:
-        market_close_str = market_hours.get("marketClose", None)
-        if market_close_str:
-            market_close = datetime.strptime(market_close_str, "%H:%M:%S")
-            clear_time = market_close - timedelta(minutes=5)
-            return clear_time
+        # Extract the session hours for the regular market
+        session_hours = market_hours.get("equity", {}).get("EQ", {}).get("sessionHours", {})
+        regular_market = session_hours.get("regularMarket", [])
+        
+        if regular_market:
+            # Get the end time of the regular market
+            market_close_str = regular_market[0].get("end")  # ISO 8601 format
+            if market_close_str:
+                # Convert to a datetime object
+                market_close = datetime.fromisoformat(market_close_str).astimezone(pytz.timezone("US/Eastern"))
+                # Subtract 5 minutes for the clear time
+                clear_time = market_close - timedelta(minutes=5)
+                return clear_time
+
     except Exception as e:
         logging.error(f"Error calculating clear time: {e}")
+    
     return None
+
 
 def clear_all_positions(access_token, positions, ticker_list, encrypted_account_number, current_price_fetcher, prices_buffers):
     """
@@ -138,6 +152,7 @@ def clear_all_positions(access_token, positions, ticker_list, encrypted_account_
         None
     """
     logging.info("Clearing all positions before market close...")
+    global capital
     for ticker in ticker_list:
         position = positions[ticker]["position"]
         quantity = positions[ticker]["shares"] if position == "long" else abs(positions[ticker]["borrowed_shares"])
@@ -199,6 +214,91 @@ def get_session_type(market_hours):
     
     return None  # Return None if no session is active
 
+HOLIDAYS = [
+    "2024-01-01",  # New Year's Day
+    "2024-01-15",  # Martin Luther King Jr. Day
+    "2024-02-19",  # Presidents' Day
+    "2024-04-01",  # Good Friday
+    "2024-05-27",  # Memorial Day
+    "2024-07-04",  # Independence Day
+    "2024-09-02",  # Labor Day
+    "2024-11-28",  # Thanksgiving
+    "2024-12-25",  # Christmas Day
+    "2025-01-01",  # New Year's Day
+    "2025-01-20",  # Martin Luther King Jr. Day
+    "2025-02-17",  # Presidents' Day
+    "2025-04-18",  # Good Friday
+    "2025-05-26",  # Memorial Day
+    "2025-07-04",  # Independence Day
+    "2025-09-01",  # Labor Day
+    "2025-11-27",  # Thanksgiving
+    "2025-12-25",  # Christmas Day
+    "2026-01-01",  # New Year's Day
+    "2026-01-19",  # Martin Luther King Jr. Day
+    "2026-02-16",  # Presidents' Day
+    "2026-04-03",  # Good Friday
+    "2026-05-25",  # Memorial Day
+    "2026-07-03",  # Independence Day Observed (July 4 is Saturday)
+    "2026-09-07",  # Labor Day
+    "2026-11-26",  # Thanksgiving
+    "2026-12-25",  # Christmas Day
+]
+
+def sleep_until_next_market_open():
+    """
+    Sleep until the next normal trading session (9:30 AM - 4:00 PM Eastern Time) using the NYSE market calendar.
+    """
+    nyse = mcal.get_calendar('NYSE')
+    eastern = pytz.timezone("US/Eastern")
+    now = datetime.now(eastern)
+
+    # Fetch the market schedule for the next few days
+    schedule = nyse.schedule(start_date=now.strftime('%Y-%m-%d'),
+                              end_date=(now + timedelta(days=5)).strftime('%Y-%m-%d'))
+
+    # Iterate over the schedule to find the next normal trading session
+    for _, row in schedule.iterrows():
+        market_open = row['market_open']
+        market_close = row['market_close']
+
+        # Check if current time is within the normal trading hours
+        if now < market_open:
+            # Sleep until the next market open
+            sleep_duration = (market_open - now).total_seconds()
+            logging.info(f"Market is closed. Sleeping for {sleep_duration / 3600:.2f} hours until the next normal market open.")
+            time.sleep(sleep_duration)
+            return
+        elif market_open <= now < market_close:
+            # Market is currently open during normal trading hours
+            logging.info("Market is currently open during normal trading hours.")
+            return
+
+    # If no valid trading session is found, log an error (this shouldn't normally happen)
+    logging.error("Could not find the next normal trading session.")
+
+def is_market_open(date):
+    """
+    Check if the market is open on the given date.
+
+    Args:
+        date (datetime): The date to check.
+
+    Returns:
+        bool: True if the market is open, False otherwise.
+    """
+    # Convert date to string for holiday matching
+    date_str = date.strftime("%Y-%m-%d")
+
+    # Market is closed on weekends
+    if date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        return False
+
+    # Market is closed on holidays
+    if date_str in HOLIDAYS:
+        return False
+
+    return True
+
 def trade_logic():
     """Execute trading logic in real-time."""
     logger.info("hellohello everyone!")
@@ -235,13 +335,13 @@ def trade_logic():
             else:
                 session_type = None  # Set to None if market_hours fetch failed
 
-            current_time = datetime.now().time()
+            current_time = datetime.now(pytz.timezone("US/Eastern"))
             # Clear all positions 5 minutes before market close
             if clear_time and current_time >= clear_time:
                 clear_all_positions(access_token, positions, tickers, encrypted_account_number, fetch_market_price, prices_buffers)
                 total_capital_used = 0  # Reset total capital usage
                 logging.info("All positions cleared. Exiting trading loop.")
-                return  # Exit trading logic after clearing all positions
+                sleep_until_next_market_open()
 
             price = fetch_market_price(ticker, access_token)
             if price is None:
