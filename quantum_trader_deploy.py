@@ -107,8 +107,7 @@ def trade_logic():
     """Execute trading logic in real-time."""
     global capital
     logging.info("Starting trading logic...")
-    access_token, account_number = get_latest_token_and_account()
-    encrypted_account_number = get_encrypted_account_number(access_token)
+
 
     # Initialize price buffers and positions for each ticker
     prices_buffers = {ticker: [] for ticker in tickers}
@@ -123,6 +122,8 @@ def trade_logic():
     }
 
     while True:  # Continuous trading loop
+        access_token, account_number = get_latest_token_and_account()
+        encrypted_account_number = get_encrypted_account_number(access_token)
         for ticker in tickers:  # Iterate through tickers
             session_type = check_market_hours(access_token)
             if not session_type:

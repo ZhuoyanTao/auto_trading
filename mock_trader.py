@@ -40,46 +40,52 @@ def make_api_request(method, endpoint, access_token):
         logging.error(f"API request failed: {e}")
         return None
 
-def check_market_hours(access_token):
+def check_market_hours(access_token, market_id="equity", date=None):
     """
-    Check the current market session and return its type.
+    Fetch market hours for a given market and date using Schwab API.
+
+    Args:
+        access_token (str): The API access token for authorization.
+        market_id (str): The market ID to query (default is 'equity').
+        date (str): The date to fetch market hours for (format: 'YYYY-MM-DD'). Defaults to today.
+
+    Returns:
+        dict: The market hours data if successful, None otherwise.
     """
-    logging.debug("Checking market hours...")
-    endpoint = "marketdata/v1/markets/equity"
-    date_today = datetime.now().strftime("%Y-%m-%d")
-    data = make_api_request("GET", f"{endpoint}?date={date_today}", access_token)
-
-    if not data:
-        logging.error("Failed to fetch market hours data.")
-        return None
-
     try:
-        equity_data = data.get("equity", {}).get("EQ", {})
-        sessions = equity_data.get("sessionHours", {})
-        now = datetime.now(pytz.utc)  # Ensure UTC for accurate comparisons
-
-        logging.info(f"Current UTC time: {now}")
-        logging.info("Market session details fetched:")
-        logging.info(equity_data)
-
-        for session_type, periods in sessions.items():
-            for session in periods:
-                start = datetime.fromisoformat(session["start"]).astimezone(pytz.utc)
-                end = datetime.fromisoformat(session["end"]).astimezone(pytz.utc)
-
-                logging.info(
-                    f"Session type: {session_type}, Start: {start}, End: {end}"
-                )
-
-                if start <= now <= end:
-                    logging.info(f"Current session: {session_type}")
-                    return session_type
-
-        logging.info("Market is currently closed.")
-        return None  # Market is closed
+        # Default to today's date if not provided
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Construct the API URL
+        url = f"https://api.schwabapi.com/marketdata/v1/markets/{market_id}?date={date}"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "accept": "application/json"
+        }
+        
+        logging.info(f"Fetching market hours for market ID: {market_id}, date: {date}")
+        
+        # Make the GET request
+        response = requests.get(url, headers=headers)
+        logging.info(f"API Response Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            # Parse the response JSON
+            market_hours = response.json()
+            logging.info(f"Market hours data fetched successfully: {market_hours}")
+            return market_hours
+        elif response.status_code == 401:
+            logging.error("Unauthorized (401): Check your access token.")
+        elif response.status_code == 404:
+            logging.error("Not Found (404): Invalid market ID or date.")
+        else:
+            logging.error(f"Failed to fetch market hours: {response.status_code} - {response.text}")
+        
     except Exception as e:
-        logging.error(f"Error parsing market hours: {e}")
-        return None
+        logging.error(f"Error fetching market hours: {e}")
+    
+    return None
 
 
 
