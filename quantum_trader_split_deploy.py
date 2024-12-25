@@ -318,7 +318,7 @@ def trade_logic():
         }
         for ticker in tickers
     }
-
+    sleep_until_next_market_open()
     while True:  # Continuous trading loop
         access_token, account_number = get_latest_token_and_account()
         prev_encrypted_account_number = encrypted_account_number 
