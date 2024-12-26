@@ -42,7 +42,7 @@ logger.info("Logger initialized with both file size and daily rotation handlers.
 
 
 # Trading parameters
-tickers = ["RGTI", "QUBT", "QBTS", "IONQ"]
+tickers = ["RGTI", "QBTS"]
 transaction_cost = 0.0005  # 0.05%
 capital = 4000  # Starting capital
 neighborhood_size = 10
@@ -89,13 +89,13 @@ def should_exit_trade(position, prices, entry_price, stop_loss_percent):
     peak_price = max(prices) if position == "long" else min(prices)
     current_price = prices[-1]
     if position == "long":
-        if current_price <= peak_price * (1 - stop_loss_percent):
+        if current_price <= max(entry_price * (1 - stop_loss_percent), peak_price * (1 - stop_loss_percent)):
             logging.info(
                 f"Exit condition: LONG STOP-LOSS triggered. current_price={current_price:.2f}, peak_price={peak_price:.2f}"
             )
             return True
     elif position == "short":
-        if current_price >= peak_price * (1 + stop_loss_percent):
+        if current_price >= min(entry_price * (1 + stop_loss_percent), peak_price * (1 + stop_loss_percent)):
             logging.info(
                 f"Exit condition: SHORT STOP-LOSS triggered. current_price={current_price:.2f}, minPrice={peak_price:.2f}"
             )
@@ -375,12 +375,12 @@ def trade_logic():
                         potential_cost = 0
 
                     # Check if total capital usage exceeds $4000
-                    if (total_capital_used + potential_cost) > capital:
-                        logging.warning(
-                            f"Trade skipped for {ticker}. "
-                            f"Entering this position would exceed the $4000 + proceeds capital limit."
-                        )
-                        continue  # Skip this trade
+                    # if (total_capital_used + potential_cost) > capital:
+                    #     logging.warning(
+                    #         f"Trade skipped for {ticker}. "
+                    #         f"Entering this position would exceed the $4000 + proceeds capital limit."
+                    #     )
+                    #     continue  # Skip this trade
 
                     if decision == "long" and quantity > 0:
                         logging.info(
@@ -416,6 +416,8 @@ def trade_logic():
                             positions[ticker]["borrowed_shares"] += quantity
                             positions[ticker]["entry_price"] = price
                             positions[ticker]["position"] = "short"
+                            capital_cost = quantity * price * (1 + transaction_cost)
+                            capital -= capital_cost
                             total_capital_used += quantity * price  # Add market value to capital used
                             logging.info(
                                 f"SHORT entered: market value={quantity * price:.2f}, "
@@ -459,7 +461,9 @@ def trade_logic():
                             access_token, encrypted_account_number, trade
                         ):
                             cost = quantity * price * (1 + transaction_cost)
-                            capital -= cost
+                            proceeds = quantity * positions[ticker]["entry_price"] * quantity
+                            profit = proceeds - cost
+                            capital += proceeds + profit
                             total_capital_used -= positions[ticker]["borrowed_shares"] * positions[ticker]["entry_price"]
                             positions[ticker]["borrowed_shares"] = 0
                             positions[ticker]["entry_price"] = 0
