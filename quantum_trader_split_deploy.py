@@ -6,28 +6,46 @@ from mock_trader import (
     fetch_market_price,
     place_order_with_validation,
     check_market_hours,
-    make_api_request
+    make_api_request,
+    get_account_positions
 )
 import pandas_market_calendars as mcal
 import logging
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from datetime import datetime, timezone, timedelta
+import pytz
 
-# Configure RotatingFileHandler
+class EasternTimeFormatter(logging.Formatter):
+    """
+    Custom formatter to display log timestamps in US/Eastern time.
+    """
+
+    def formatTime(self, record, datefmt=None):
+        # Convert record.created (epoch) to a datetime in US/Eastern
+        dt = datetime.fromtimestamp(record.created, pytz.timezone("US/Eastern"))
+        if datefmt:
+            return dt.strftime(datefmt)
+        else:
+            # Default format if datefmt isn't provided
+            return dt.isoformat()
+
+
+# Create your custom EasternTimeFormatter instances
+file_size_formatter = EasternTimeFormatter(
+    "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+)
+daily_rotation_formatter = EasternTimeFormatter(
+    "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+)
+
+# Apply them to the handlers
 file_size_handler = RotatingFileHandler(
     "trader_log.log", maxBytes=5 * 1024 * 1024, backupCount=3
-)  # 5MB per file, keep 3 backups
-file_size_formatter = logging.Formatter(
-    "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
 )
 file_size_handler.setFormatter(file_size_formatter)
 
-# Configure TimedRotatingFileHandler
 daily_rotation_handler = TimedRotatingFileHandler(
     "trader_log_daily.log", when="midnight", interval=1, backupCount=7
-)  # Rotate daily, keep logs for 7 days
-daily_rotation_formatter = logging.Formatter(
-    "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
 )
 daily_rotation_handler.setFormatter(daily_rotation_formatter)
 
@@ -36,23 +54,18 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(file_size_handler)
 logger.addHandler(daily_rotation_handler)
+logger.info("This is a test log message.")
 
-# Example usage
-logger.info("Logger initialized with both file size and daily rotation handlers.")
 
 
 # Trading parameters
 tickers = ["RGTI", "QBTS"]
 transaction_cost = 0.0005  # 0.05%
 capital = 4000  # Starting capital
-neighborhood_size = 10
+neighborhood_size = 20
 threshold = 0.02
 stop_loss_percent = 0.05
 
-# Keep track of positions
-positions = {
-    ticker: {"shares": 0, "entry_price": 0, "borrowed_shares": 0} for ticker in tickers
-}
 
 
 def should_enter_trade(prices, threshold):
@@ -174,7 +187,7 @@ def clear_all_positions(access_token, positions, ticker_list, encrypted_account_
                 capital -= cost
 
             if trade and place_order_with_validation(access_token, encrypted_account_number, trade):
-                logging.info(f"Cleared {position.upper()} position for {ticker} with quantity {quantity}.")
+                logging.info(f"Cleared {position.upper()} position for {ticker} with quantity {quantity}. More retries in the next 5min")
                 positions[ticker]["shares"] = 0
                 positions[ticker]["borrowed_shares"] = 0
                 positions[ticker]["entry_price"] = 0
@@ -261,7 +274,7 @@ def sleep_until_next_market_open():
         market_open = row['market_open']
         market_close = row['market_close']
 
-        # Check if current time is within the normal trading hours
+        # # Check if current time is within the normal trading hours
         if now < market_open:
             # Sleep until the next market open
             sleep_duration = (market_open - now).total_seconds()
@@ -270,7 +283,7 @@ def sleep_until_next_market_open():
             return
         elif market_open <= now < market_close:
             # Market is currently open during normal trading hours
-            logging.info("Market is currently open during normal trading hours.")
+            logging.info("Market is currently open during normal trading hours. This is the last 5min after market close")
             return
 
     # If no valid trading session is found, log an error (this shouldn't normally happen)
@@ -324,6 +337,23 @@ def trade_logic():
         prev_encrypted_account_number = encrypted_account_number 
         encrypted_account_number = get_encrypted_account_number(access_token, prev_encrypted_account_number)
 
+        logger.info("Fetching account positions...")
+        quantities = get_account_positions(access_token, encrypted_account_number, tickers)
+        logger.info(f"Retrieved quantities: {quantities}")
+
+        for ticker, qty in quantities.items():
+            logger.info(f"Updating positions for {ticker}: {qty}")
+            positions[ticker]["shares"] = qty["long"]
+            positions[ticker]["borrowed_shares"] = qty["short"]
+            positions[ticker]["position"] = (
+                "long" if qty["long"] > 0 else "short" if qty["short"] > 0 else None
+            )
+            logger.info(
+                f"{ticker} | Shares: {positions[ticker]['shares']}, "
+                f"Borrowed Shares: {positions[ticker]['borrowed_shares']}, "
+                f"Position: {positions[ticker]['position']}"
+            )
+        
         for ticker in tickers:  # Iterate through tickers
             market_hours = check_market_hours(access_token)
             logger.info(f"Market hours are: {market_hours}")
@@ -334,7 +364,7 @@ def trade_logic():
                     logging.info(f"Positions will be cleared at {clear_time.time()}.")
             else:
                 session_type = None  # Set to None if market_hours fetch failed
-
+            
             current_time = datetime.now(pytz.timezone("US/Eastern"))
             # Clear all positions 5 minutes before market close
             if clear_time and current_time >= clear_time:
@@ -417,7 +447,7 @@ def trade_logic():
                             positions[ticker]["entry_price"] = price
                             positions[ticker]["position"] = "short"
                             capital_cost = quantity * price * (1 + transaction_cost)
-                            capital -= capital_cost
+                            # capital -= capital_cost
                             total_capital_used += quantity * price  # Add market value to capital used
                             logging.info(
                                 f"SHORT entered: market value={quantity * price:.2f}, "
@@ -461,9 +491,9 @@ def trade_logic():
                             access_token, encrypted_account_number, trade
                         ):
                             cost = quantity * price * (1 + transaction_cost)
-                            proceeds = quantity * positions[ticker]["entry_price"] * quantity
+                            proceeds = positions[ticker]["entry_price"] * quantity
                             profit = proceeds - cost
-                            capital += proceeds + profit
+                            capital += profit
                             total_capital_used -= positions[ticker]["borrowed_shares"] * positions[ticker]["entry_price"]
                             positions[ticker]["borrowed_shares"] = 0
                             positions[ticker]["entry_price"] = 0
@@ -474,7 +504,7 @@ def trade_logic():
                             )
 
         logger.info('End of True iteration, waiting 60s.')
-        time.sleep(60)  # Wait before processing the next ticker
+        time.sleep(30)  # Wait before processing the next ticker
 
 
 

@@ -209,6 +209,90 @@ def fetch_market_price(symbol: str, access_token: str) -> Optional[float]:
         logging.error(f"Unexpected error while fetching price for {symbol}: {e}")
         return None
 
+def parse_quantities(response_data, symbols):
+    """
+    Parse the quantities (long and short) for the specified symbols from the response data.
+
+    Args:
+        response_data (dict): The response data from the Schwab API.
+        symbols (list): List of symbols to retrieve quantities for.
+
+    Returns:
+        dict: A dictionary mapping symbols to their respective long and short quantities.
+    """
+    try:
+        # Access the positions list directly
+        positions_list = response_data.get("securitiesAccount", {}).get("positions", [])
+        quantities = {}
+        
+        for position in positions_list:
+            symbol = position.get("instrument", {}).get("symbol")
+            if symbol in symbols:
+                # Initialize a dictionary for the symbol if not already present
+                if symbol not in quantities:
+                    quantities[symbol] = {"long": 0.0, "short": 0.0}
+                
+                # Update long and short quantities
+                quantities[symbol]["long"] = position.get("longQuantity", 0.0)
+                quantities[symbol]["short"] = position.get("shortQuantity", 0.0)
+        
+        return quantities
+
+    except Exception as e:
+        logging.error(f"Error parsing quantities: {e}")
+        return {}
+
+
+
+def get_account_positions(access_token, account_number, symbols):
+    """
+    Fetch the specific account balance and positions for the logged-in user.
+
+    Args:
+        access_token (str): The OAuth 2.0 bearer token (or API token) needed to
+                           authorize the request.
+        account_number (str): The encrypted ID of the account (e.g. '123').
+    
+    Returns:
+        dict: The JSON response parsed from the server, which may contain
+              balances, positions, or errors.
+    
+    Raises:
+        requests.exceptions.RequestException: For network-related errors.
+        requests.exceptions.HTTPError: For non-2xx status codes.
+    """
+    # Construct the endpoint
+    url = f"https://api.schwabapi.com/trader/v1/accounts/{account_number}"
+    
+    # Query params to request positions
+    params = {"fields": "positions"}
+    
+    # Request headers, including Bearer token authorization
+    headers = {
+        "accept": "application/json",
+        "Authorization": f"Bearer {access_token}"
+    }
+    
+    logging.info("Sending request to Schwab API...")
+    logging.info(f"GET {url} with params={params}")
+    
+    # Perform the GET request
+    response = requests.get(url, headers=headers, params=params)
+    print(f"Final request URL: {response.url}")
+    
+    # Check if the response indicates an error (e.g., 401 Unauthorized)
+    # raise_for_status() will throw an HTTPError if status >= 400
+    if response.status_code != 200:
+        logging.warning(f"Response status code: {response.status_code}")
+    response.raise_for_status()
+
+    # Parse and return the JSON body
+    data = response.json()
+    logging.info("Request successful; parsed response JSON.")
+    quantities_dict = parse_quantities(data, symbols)
+    return quantities_dict
+
+
 
 def fetch_all_orders(access_token, encrypted_account_number):
     import datetime
@@ -375,23 +459,32 @@ def get_order_payload(order_type, symbol, quantity, price=None):
 # Main function to test placing various orders
 def main():
     access_token, account_number = get_latest_token_and_account()
-    encrypted_account_number = get_encrypted_account_number(access_token)
+    encrypted_account_number = get_encrypted_account_number(access_token, account_number)
     # Example trades
-    trades = [
-        {"order_type": "BUY", "symbol": "RGTI", "quantity": 1},
-        {"order_type": "BUY", "symbol": "COST", "quantity": 1},
-        {"order_type": "SELL", "symbol": "AAPL", "quantity": 1},
-        {"order_type": "SELL_SHORT", "symbol": "QUBT", "quantity": 1},
-        {"order_type": "BUY_TO_COVER", "symbol": "QUBT", "quantity": 1}
-    ]
+    # trades = [
+    #     {"order_type": "BUY", "symbol": "RGTI", "quantity": 1},
+    #     {"order_type": "BUY", "symbol": "COST", "quantity": 1},
+    #     {"order_type": "SELL", "symbol": "AAPL", "quantity": 1},
+    #     {"order_type": "SELL_SHORT", "symbol": "QUBT", "quantity": 1},
+    #     {"order_type": "BUY_TO_COVER", "symbol": "QUBT", "quantity": 1}
+    # ]
 
-    for trade in trades:
-        place_order_with_validation(access_token, encrypted_account_number, trade)
+    # for trade in trades:
+    #     place_order_with_validation(access_token, encrypted_account_number, trade)
 
     orders = fetch_all_orders(access_token, encrypted_account_number)
     if orders:
         for order in orders:
             logging.info(f"Order Status: {order['status']}, Symbol: {order['orderLegCollection'][0]['instrument']['symbol']}")
+        symbols =["RGTI", "QBTS"]
+        positions = get_account_positions(
+        access_token=access_token,
+        account_number=encrypted_account_number,
+        symbols=symbols
+    )
+    print(f'quantities is {positions}')
+    
+
 
 if __name__ == "__main__":
     main()
