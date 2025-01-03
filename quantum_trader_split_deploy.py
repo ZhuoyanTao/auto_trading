@@ -64,7 +64,7 @@ transaction_cost = 0.0005  # 0.05%
 capital = 4000  # Starting capital
 neighborhood_size = 20
 threshold = 0.02
-stop_loss_percent = 0.05
+stop_loss_percent = 0.01
 
 
 

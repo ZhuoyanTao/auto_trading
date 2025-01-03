@@ -402,7 +402,12 @@ def place_order_with_validation(access_token, encrypted_account_number, trade):
     if trade["order_type"] in ["BUY", "SELL"] and "price" not in trade:
         market_price = fetch_market_price(trade["symbol"], access_token)
         if market_price:
-            trade["price"] = market_price
+            if trade["order_type"] == "BUY":
+                trade["price"] = round(market_price + 0.01, 2)
+                logging.info(f"Adjusted price for BUY order: {trade['price']}")
+            elif trade["order_type"] == "SELL":
+                trade["price"] = round(market_price - 0.01, 2)
+                logging.info(f"Adjusted price for SELL order: {trade['price']}")
 
     payload = get_order_payload(
         trade["order_type"], trade["symbol"], trade["quantity"], trade.get("price")
