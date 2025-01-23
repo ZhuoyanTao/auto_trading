@@ -26,7 +26,7 @@ def make_api_request(method, endpoint, access_token):
     
     headers = {
         "accept": "application/json",
-        "Authorization": f"Bearer {access_token}",  # Replace with your actual token
+        "Authorization": f"Bearer {access_token}",  
     }
 
     try:
@@ -330,8 +330,8 @@ def fetch_all_orders(access_token, encrypted_account_number):
 
 # Fetch latest access token and account number from AWS Secrets Manager
 def get_latest_token_and_account():
-    secret_name = "SchwabAPI_Credentials"  # Replace with your secret name
-    region_name = "us-east-2"  # Replace with your region
+    secret_name = "SchwabAPI_Credentials"  
+    region_name = "us-east-2"  
 
     logging.info("Fetching latest token and account from Secrets Manager...")
     client = boto3.client("secretsmanager", region_name=region_name)
